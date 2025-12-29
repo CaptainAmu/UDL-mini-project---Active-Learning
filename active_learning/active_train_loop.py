@@ -26,7 +26,7 @@ def acquire_point_indices(
     K,
     T=20,
     MC = True,
-    batch_size=64, 
+    batch_size=256, 
     device="cuda"
 ):
     """
@@ -58,10 +58,11 @@ def acquire_point_indices(
     model.eval()
     scores = []
 
-    # Compute scores for pool data in batches
+    # Obtain top-K indices for highest uncertainty scores
     if acquisition_fn == 'random':
         topk_pos = torch.randperm(len(pool_indices))[:K]
     else:
+        # Compute scores
         acquisition_fn = acquisition_dict[acquisition_fn]
         for i in range(0, len(pool_indices), batch_size):
             batch_indices = pool_indices[i:i+batch_size]
@@ -69,10 +70,13 @@ def acquire_point_indices(
             score_batch = acquisition_fn(model, x_batch, T = T, MC = MC)  # [batch_size]
             scores.append(score_batch.cpu())
         scores = torch.cat(scores)  # [len(pool_indices)]
-        print(f'Next acquisition: Scores min = {scores.min()}, mean = {scores.mean()}, max = {scores.max()} \n')
+        print(f'Next acquisition: Scores min = {scores.min()}, mean = {scores.mean()}, max = {scores.max()}')
+        if scores.std() < 1e-7:
+            print(f'Warning: All acquisition scores are effectively the same. Scores std = {scores.std()}')
         _, topk_pos = torch.topk(scores, K)
     
     selected_indices = [pool_indices[i] for i in topk_pos.cpu().tolist()]
+    print(f'Selected indices: {topk_pos.cpu().tolist()} \n')
     return selected_indices
 
 def active_learning(
@@ -109,7 +113,7 @@ def active_learning(
         (Model, history): Tuple of model and accuracy over test set.
 
     """
-    seed = np.random.randint(0, 10000) if random_split else 0
+    seed = np.random.randint(0, 10000) if random_split else 42
     splits = split_dataset_indices(dataset, split_size, seed)
     train_indices = splits["train"]
     pool_indices = splits["pool"]
